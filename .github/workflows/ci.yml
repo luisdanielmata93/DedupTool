@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Projects target net8.0; the .slnx solution format needs SDK 9.0.200+.
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+
+      - name: Restore
+        run: dotnet restore DedupTool.slnx
+
+      - name: Build
+        run: dotnet build DedupTool.slnx --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test DedupTool.slnx --configuration Release --no-build --verbosity normal
