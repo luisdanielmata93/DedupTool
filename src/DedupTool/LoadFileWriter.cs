@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 
 namespace DedupTool;
@@ -10,18 +11,46 @@ public static class LoadFileWriter
 {
     public const string Header = "DocID,FamilyID,ParentID,Custodian,DocType,FileName,SentDate,Hash";
 
+    private static readonly SearchValues<char> NeedsQuoting = SearchValues.Create(",\"\r\n");
+
     public static string ToCsv(IEnumerable<LoadFileRow> rows)
     {
+        using var writer = new StringWriter();
+        WriteCsv(writer, rows);
+        return writer.ToString();
+    }
+
+    /// <summary>Streams rows to disk (UTF-8, no BOM) instead of building the whole file in memory.</summary>
+    public static void Write(string path, IEnumerable<LoadFileRow> rows)
+    {
+        using var writer = new StreamWriter(path, append: false, new UTF8Encoding(false), bufferSize: 64 * 1024);
+        WriteCsv(writer, rows);
+    }
+
+    private static void WriteCsv(TextWriter w, IEnumerable<LoadFileRow> rows)
+    {
         // Ingest job expects LF line endings regardless of platform.
-        var sb = new StringBuilder();
-        sb.Append(Header).Append('\n');
+        w.Write(Header);
+        w.Write('\n');
         foreach (var r in rows)
         {
-            sb.AppendJoin(',',
-                Escape(r.DocId), Escape(r.FamilyId), Escape(r.ParentId), Escape(r.Custodian),
-                Escape(r.DocType), Escape(r.FileName), Escape(r.SentDate), Escape(r.Hash)).Append('\n');
+            WriteField(w, r.DocId); w.Write(',');
+            WriteField(w, r.FamilyId); w.Write(',');
+            WriteField(w, r.ParentId); w.Write(',');
+            WriteField(w, r.Custodian); w.Write(',');
+            WriteField(w, r.DocType); w.Write(',');
+            WriteField(w, r.FileName); w.Write(',');
+            WriteField(w, r.SentDate); w.Write(',');
+            WriteField(w, r.Hash);
+            w.Write('\n');
         }
-        return sb.ToString();
+    }
+
+    private static void WriteField(TextWriter w, string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return;
+        if (value.AsSpan().IndexOfAny(NeedsQuoting) < 0) w.Write(value);
+        else w.Write(Escape(value));
     }
 
     /// <summary>
@@ -31,12 +60,7 @@ public static class LoadFileWriter
     internal static string Escape(string? value)
     {
         value ??= "";
-        if (value.IndexOfAny(new[] { ',', '"', '\r', '\n' }) < 0) return value;
+        if (value.AsSpan().IndexOfAny(NeedsQuoting) < 0) return value;
         return "\"" + value.Replace("\"", "\"\"") + "\"";
-    }
-
-    public static void Write(string path, IEnumerable<LoadFileRow> rows)
-    {
-        File.WriteAllText(path, ToCsv(rows));
     }
 }
